@@ -157,6 +157,32 @@ DELETE FROM 表名 WHERE 表达式; #根据条件删除记录
 --当有匹配的记录时，返回成功，且显示删除的行数和WHERE语句匹配的行数
 --如果没有匹配记录，也返回成功，显示删除行数和WHERE语句匹配行数为0
 ```
+#### ALTER命令
+ALTER命令可以用来修改数据表名或者修改数据表字段
+##### 添加、删除、修改表字段
+```sql
+#alter命令和DROP子句删除表中某个字段,如果表中只剩下一个字段，无法用DROP删除
+ALTER TABLE 表名 DROP 字段名;
+#alter命令和ADD子句向数据表中添加字段
+ALTER TABLE 表名 ADD 字段名 类型 属性;
+#指定新增字段的位置，如果需要重置数据表字段的位置，需要先使用DROP删除字段再使用ADD添加字段并设置位置
+ALTER TABLE 表名 ADD 字段名 类型 属性 FIRST; #放在第一列
+ALTER TABLE 表名 ADD 字段名 类型 属性 AFTER 字段名; #设定在某个字段之后
+#修改字段类型和名称，使用MODIFY和CHANGE,语法差异较大
+ALTER TABLE 表名 MODIFY 字段 修改内容;
+ALTER TABLE 表名 CHANGE 字段 新字段名 类型 属性等;
+```
+##### 修改字段默认值
+```sql
+#设置字段的默认值为n
+ALTER table 表名 ALTER 字段名 SET DEFAULT n;
+#删除字段的默认值
+ALTER TABLE 表名 ALTER 字段 DROP DEFAULT;
+```
+##### 修改表名
+```sql
+ALTER TABLE 表名 RENAME TO 新表名；
+```
 ### 数据表添加索引
 #### 主键索引
 ALTER TABLE 表名 ADD PRIMARY KEY (字段名);
@@ -234,4 +260,118 @@ ROLLBACK;    #ROLLBACK 回滚事务，整个事务失败。
 
 在选择封锁粒度时，需要在锁开销和并发程度之间做一个权衡。
 
+### 补充
+- 主键：唯一标识一条记录，不能重复，不能为空；用来保证数据的完整性，一个表只能有一个主键
+- 外键：表的外键是另一个表的主键，外键可以有重复，也可以是空；用来和其他表建立连接，一个表可以用多个外键
+- 索引：不能重复，可以为空；用来提高表查询排序的速度，一个表可以有多个唯一索引
+### MySQL序列使用
+MySQL序列是一组整数，一张表中只能有一个字段自增主键，其他字段若想实现自动增加，可以使用MySQL序列实现。
+#### AUTO_INCREMENT
+AUTO_INCREMENT方法指定主键自增，步进值为1，无法改变。
+1、创建表时，指定主键自增
+```sql
+CREATE TABLE table_t 
+            ( id INT(10) NOT NULL PRIMARY KEY AUTO_INCREMENT，
+            ...)engine =INNODB, AUTO_INCREMNET = n;
+```
+指定自增主键后，插入数据时，该值设为null，可以自动递增
+```sql
+insert into table_t values (null, ...)
+```
+2、建表后，指定主键自增
+```sql
+#创建表后，再指定主键自增
+alter table 表名 change 主键名 主键名 类型 属性 AUTO_INCREMENT;
+```
+实例如下：
+```sql
+alter table table_t change id id INT(10) NOT NULL AUTO_INCREMENT;
+```
+指定主键自增后，设置之间自增初始值
+```sql
+#n为大于已有的auto_increment的整数值
+alter table 表名 AUTO_INCREMENT = n；
+#查看当前表中自增主键的值，
+show table status like '表名';
+```
+3、自增主键归零
+```sql
+#直接清空所有数据，自增字段恢复从1开始计数
+truncate table 表名
+```
+4、插入记录
+设置自增主键，插入记录，若没有为主键指定明确值，等同于NULL。若插入的值与已有的值重复，则会出现错误，若插入的值大于已有的编号，则会把值插入到表中，并在下一个编号从该新值开始递增，即可以跳过一些编号。
+#### 自增表使用
+mysql与oracle不一样，不支持直接的sequence,所以需要创建一张表来模拟sequence的功能。使用方法如下。
 
+1. 创建自增表---sequence
+```sql
+DROP TABLE IF EXISTS sequence;
+CREATE TABLE sequence (
+    name VARCHAR() NOT NULL,
+    current_value INT NOT NULL,
+    increment INT NOT NULL DEFAULT 1,
+    PRIMARY KEY(name)
+)ENGINE = InnoDB;
+```
+2. 创建---获取当前值函数 currval
+```sql
+DROP FUNCTION IF EXISTS currval;
+DELIMITER $
+CREATE FUNCTION currval(seq_name VARCHAR(50))
+RETURNS INTEGER
+CONTAINS SQL
+BEGIN
+  DECLARE value INTEGER;
+  SET value = 0;
+  SELECT current_value INTO value
+  FROM sequence
+  WHERE name = seq_name;
+  RETURN value;
+END;
+$
+DELIMITER ;
+```
+3. 创建---获取下一个值的函数 nextval
+```sql
+DROP FUNCTION IF EXISTS nextval;
+DELIMITER $
+CREATE FUNCTION nextval(seq_name VARCHAR(50))
+RETURNS INTEGER
+CONTAINS SQL
+BEGIN
+   UPDATE sequence
+   SET          current_value = current_value + increment
+   WHERE name = seq_name;
+   RETURN currval(seq_name);
+END$
+DELIMITER ;
+```
+4. 创建---更新当前值的函数 setval
+```sql
+DROP FUNCTION IF EXISTS setval;
+DELIMITER $
+CREATE FUNCTION setval (seq_name VARCHAR(50), value INTEGER)
+RETURNS INTEGER
+CONTAINS SQL
+BEGIN
+   UPDATE sequence
+   SET          current_value = value
+   WHERE name = seq_name;
+   RETURN currval(seq_name);
+END$
+DELIMITER ;
+```
+5. 测试函数功能
+```sql
+#设置创建的sequence名称,初始值，步进值
+INSERT INTO sequence VALUES ('seq_name', 0,1);
+#设置序列初始值
+SELECT SETVAL('seq_name', 10);
+#查询当前值
+SELECT CURRVAL('seq_name');
+#获取下一个值
+SELECT NEXTVAL('seq_name');
+```
+### 其他
+1. mysql中日期类型：date、time、year、datetime、timestamp。其中设置某个日期列的默认值为当前时间，只能使用timestamp类型，并设置为DEFAULT NOW()或DEFAULT CURRENT_TIMESTAMP()作为默认值。
